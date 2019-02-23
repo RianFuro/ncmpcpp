@@ -83,6 +83,15 @@ MPD::SongIterator getSongsFromAlbum(const AlbumEntry &album)
 	return Mpd.CommitSearchSongs();
 }
 
+MPD::SongIterator getAllSongsFromAlbum(const AlbumEntry &album)
+{
+    Mpd.StartSearch(true);
+    Mpd.AddSearch(MPD_TAG_ALBUM, album.entry().album());
+    if (Config.media_library_albums_split_by_date)
+        Mpd.AddSearch(MPD_TAG_DATE, album.entry().date());
+    return Mpd.CommitSearchSongs();
+}
+
 std::string AlbumToString(const AlbumEntry &ae);
 std::string SongToString(const MPD::Song &s);
 
@@ -224,9 +233,9 @@ MediaLibrary::MediaLibrary()
 	Songs.centeredCursor(Config.centered_cursor);
 	Songs.setSelectedPrefix(Config.selected_item_prefix);
 	Songs.setSelectedSuffix(Config.selected_item_suffix);
-	Songs.setItemDisplayer(std::bind(
-		Display::Songs, ph::_1, std::cref(Songs), std::cref(Config.song_library_format)
-	));
+	Songs.setItemDisplayer([](NC::Menu<MPD::Song> &menu) {
+	    menu << Charset::utf8ToLocale(SongToString(menu.drawn()->value()));
+	});
 	
 	w = &Tags;
 }
@@ -306,7 +315,7 @@ void MediaLibrary::update()
 				while (!(tag = s->get(Config.media_lib_primary_tag, idx++)).empty())
 				{
 					auto key = std::make_tuple(
-						std::move(tag),
+					    s->getAlbumArtist(),
 						s->getAlbum(),
 						Date_(s->getDate()));
 					auto it = albums.find(key);
@@ -441,7 +450,12 @@ void MediaLibrary::update()
 		sunfilter_songs.set(ReapplyFilter::Yes, true);
 		auto &album = Albums.current()->value();
 		size_t idx = 0;
-		for (MPD::SongIterator s = getSongsFromAlbum(album), end;
+		MPD::SongIterator s;
+		if (hasTwoColumns)
+		    s = getAllSongsFromAlbum(album);
+		else
+		    s = getSongsFromAlbum(album);
+		for (MPD::SongIterator end;
 		     s != end; ++s, ++idx)
 		{
 			if (idx < Songs.size())
@@ -1068,26 +1082,22 @@ std::string AlbumToString(const AlbumEntry &ae)
 		result = "All tracks";
 	else
 	{
-		if (hasTwoColumns)
-		{
-			if (ae.entry().tag().empty())
-				result += Config.empty_tag;
-			else
-				result += ae.entry().tag();
-			result += " - ";
-		}
-		if (Config.media_lib_primary_tag != MPD_TAG_DATE && !ae.entry().date().empty())
-			result += "(" + ae.entry().date() + ") ";
 		result += ae.entry().album().empty() ? "<no album>" : ae.entry().album();
+
+        if (hasTwoColumns && !ae.entry().tag().empty())
+            result += " - " + ae.entry().tag();
+
+        if (Config.media_lib_primary_tag != MPD_TAG_DATE && !ae.entry().date().empty())
+            result += " (" + ae.entry().date() + ")";
 	}
 	return result;
 }
 
 std::string SongToString(const MPD::Song &s)
 {
-	return Format::stringify<char>(
-		Config.song_library_format, &s
-	);
+    return (hasTwoColumns
+        ? Format::stringify<char>(Format::parse("{%n - }%t{ - %a}"), &s)
+        : Format::stringify<char>(Config.song_library_format, &s));
 }
 
 bool TagEntryMatcher(const Regex::Regex &rx, const PrimaryTag &pt)
