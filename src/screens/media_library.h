@@ -1,3 +1,5 @@
+#include <utility>
+
 /***************************************************************************
  *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
@@ -118,7 +120,7 @@ struct MediaLibrary: Screen<NC::Window *>, Filterable, HasColumns, HasSongs, Sea
 	struct AlbumEntry
 	{
 		AlbumEntry() : m_all_tracks_entry(false), m_album("", "", "", 0) { }
-		explicit AlbumEntry(Album album_) : m_all_tracks_entry(false), m_album(album_) { }
+		explicit AlbumEntry(Album album_) : m_all_tracks_entry(false), m_album(std::move(album_)) { }
 		
 		const Album &entry() const { return m_album; }
 		bool isAllTracksEntry() const { return m_all_tracks_entry; }

@@ -128,7 +128,7 @@ void Connection::Connect()
 
 bool Connection::Connected() const
 {
-	return m_connection.get() != nullptr;
+	return m_connection != nullptr;
 }
 
 void Connection::Disconnect()
@@ -145,7 +145,7 @@ unsigned Connection::Version() const
 
 void Connection::SetHostname(const std::string &host)
 {
-	size_t at = host.find("@");
+	size_t at = host.find('@');
 	if (at != std::string::npos)
 	{
 		m_password = host.substr(0, at);
