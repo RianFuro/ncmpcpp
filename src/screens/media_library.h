@@ -1,5 +1,7 @@
 #include <utility>
 
+#include <utility>
+
 /***************************************************************************
  *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
@@ -101,32 +103,61 @@ struct MediaLibrary: Screen<NC::Window *>, Filterable, HasColumns, HasSongs, Sea
 	
 	struct Album
 	{
-		Album(std::string tag_, std::string album_, std::string date_, time_t mtime_)
+		Album(std::string tag_, std::string album_, std::string date_, time_t mtime_, std::vector<MPD::Song> songs_)
 		: m_tag(std::move(tag_)), m_album(std::move(album_))
-		, m_date(std::move(date_)), m_mtime(mtime_) { }
+		, m_date(std::move(date_)), m_mtime(mtime_)
+		, m_songs(std::move(songs_)) { }
 		
 		const std::string &tag() const { return m_tag; }
 		const std::string &album() const { return m_album; }
 		const std::string &date() const { return m_date; }
+
+		const std::string albumArtist() const {
+		    auto albumArtists = std::set<std::string>();
+		    for (auto const& song: m_songs) albumArtists.insert(song.getAlbumArtist());
+
+		    if (albumArtists.empty()) return "<no album artist>";
+		    if (albumArtists.size() == 1) return *albumArtists.begin();
+		    return "<mixed values>";
+		}
+
+		const std::set<std::string> artists() const {
+		    auto artists = std::set<std::string>();
+            for (auto const& song: m_songs) artists.insert(song.getArtist());
+            return artists;
+		}
+
+		const bool isCompilation() const {
+		    std::string first_artist;
+            for(auto const& song: m_songs) {
+                if (first_artist.empty())
+                    first_artist = song.getArtist();
+                else if (first_artist != song.getArtist())
+                    return true;
+            }
+
+            return false;
+		}
 		time_t mtime() const { return m_mtime; }
 		
 	private:
 		std::string m_tag;
 		std::string m_album;
 		std::string m_date;
+		std::vector<MPD::Song> m_songs;
 		time_t m_mtime;
 	};
 	
 	struct AlbumEntry
 	{
-		AlbumEntry() : m_all_tracks_entry(false), m_album("", "", "", 0) { }
+		AlbumEntry() : m_all_tracks_entry(false), m_album("", "", "", 0, std::vector<MPD::Song>()) { }
 		explicit AlbumEntry(Album album_) : m_all_tracks_entry(false), m_album(std::move(album_)) { }
 		
 		const Album &entry() const { return m_album; }
 		bool isAllTracksEntry() const { return m_all_tracks_entry; }
 		
 		static AlbumEntry mkAllTracksEntry(std::string tag) {
-			auto result = AlbumEntry(Album(tag, "", "", 0));
+			auto result = AlbumEntry(Album(tag, "", "", 0, std::vector<MPD::Song>()));
 			result.m_all_tracks_entry = true;
 			return result;
 		}

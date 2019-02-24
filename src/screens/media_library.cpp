@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <iostream>
 
 #include "charset.h"
 #include "display.h"
@@ -85,11 +86,11 @@ MPD::SongIterator getSongsFromAlbum(const AlbumEntry &album)
 
 MPD::SongIterator getAllSongsFromAlbum(const AlbumEntry &album)
 {
-    Mpd.StartSearch(true);
-    Mpd.AddSearch(MPD_TAG_ALBUM, album.entry().album());
-    if (Config.media_library_albums_split_by_date)
-        Mpd.AddSearch(MPD_TAG_DATE, album.entry().date());
-    return Mpd.CommitSearchSongs();
+	Mpd.StartSearch(true);
+	Mpd.AddSearch(MPD_TAG_ALBUM, album.entry().album());
+	if (Config.media_library_albums_split_by_date)
+		Mpd.AddSearch(MPD_TAG_DATE, album.entry().date());
+	return Mpd.CommitSearchSongs();
 }
 
 std::string AlbumToString(const AlbumEntry &ae);
@@ -127,7 +128,7 @@ public:
 		// Sort by track numbers.
 		try {
 			ret = boost::lexical_cast<int>(a.getTags(&MPD::Song::getTrackNumber))
-			    - boost::lexical_cast<int>(b.getTags(&MPD::Song::getTrackNumber));
+				- boost::lexical_cast<int>(b.getTags(&MPD::Song::getTrackNumber));
 		} catch (boost::bad_lexical_cast &) {
 			ret = a.getTrackNumber().compare(b.getTrackNumber());
 		}
@@ -136,7 +137,7 @@ public:
 
 		// If track numbers are equal, sort by the display format.
 		return Format::stringify<char>(Config.song_library_format, &a)
-		     < Format::stringify<char>(Config.song_library_format, &b);
+			 < Format::stringify<char>(Config.song_library_format, &b);
 	}
 };
 
@@ -234,7 +235,7 @@ MediaLibrary::MediaLibrary()
 	Songs.setSelectedPrefix(Config.selected_item_prefix);
 	Songs.setSelectedSuffix(Config.selected_item_suffix);
 	Songs.setItemDisplayer([](NC::Menu<MPD::Song> &menu) {
-	    menu << Charset::utf8ToLocale(SongToString(menu.drawn()->value()));
+		menu << Charset::utf8ToLocale(SongToString(menu.drawn()->value()));
 	});
 	
 	w = &Tags;
@@ -307,7 +308,7 @@ void MediaLibrary::update()
 		{
 			m_albums_update_request = false;
 			sunfilter_albums.set(ReapplyFilter::Yes, true);
-			std::map<std::tuple<std::string, std::string, std::string>, time_t> albums;
+			std::map<std::tuple<std::string, std::string, std::string>, std::tuple<time_t, std::vector<MPD::Song>>> albums;
 			for (MPD::SongIterator s = getDatabaseIterator(Mpd), end; s != end; ++s)
 			{
 				std::string tag;
@@ -315,24 +316,27 @@ void MediaLibrary::update()
 				while (!(tag = s->get(Config.media_lib_primary_tag, idx++)).empty())
 				{
 					auto key = std::make_tuple(
-					    s->getAlbumArtist(),
+						s->getAlbumArtist(),
 						s->getAlbum(),
 						Date_(s->getDate()));
 					auto it = albums.find(key);
 					if (it == albums.end())
-						albums[std::move(key)] = s->getMTime();
-					else
-						it->second = s->getMTime();
+						albums[std::move(key)] = std::make_tuple(s->getMTime(), std::vector<MPD::Song>());
+					else {
+						std::get<0>(it->second) = std::max(std::get<0>(it->second), s->getMTime());
+						std::get<1>(it->second).push_back(*s);
+					}
 				}
 			}
 			size_t idx = 0;
 			for (const auto &album : albums)
 			{
 				auto entry = AlbumEntry(
-                        Album(std::get<0>(album.first),
-                              std::get<1>(album.first),
-                              std::get<2>(album.first),
-                              album.second));
+						Album(std::get<0>(album.first),
+							  std::get<1>(album.first),
+							  std::get<2>(album.first),
+							  std::get<0>(album.second),
+							  std::get<1>(album.second)));
 				if (idx < Albums.size())
 					Albums[idx].value() = std::move(entry);
 				else
@@ -394,23 +398,25 @@ void MediaLibrary::update()
 		{
 			ScopedUnfilteredMenu<AlbumEntry> sunfilter_albums(ReapplyFilter::No, Albums);
 			if (!Tags.empty()
-			    && ((Albums.empty() && Global::Timer - m_timer > m_fetching_delay)
-			        || m_albums_update_request))
+				&& ((Albums.empty() && Global::Timer - m_timer > m_fetching_delay)
+					|| m_albums_update_request))
 			{
 				m_albums_update_request = false;
 				sunfilter_albums.set(ReapplyFilter::Yes, true);
 				auto &primary_tag = Tags.current()->value().tag();
 				Mpd.StartSearch(true);
 				Mpd.AddSearch(Config.media_lib_primary_tag, primary_tag);
-				std::map<std::tuple<std::string, std::string>, time_t> albums;
+				std::map<std::tuple<std::string, std::string>, std::tuple<time_t, std::vector<MPD::Song>>> albums;
 				for (MPD::SongIterator s = Mpd.CommitSearchSongs(), end; s != end; ++s)
 				{
 					auto key = std::make_tuple(s->getAlbum(), Date_(s->getDate()));
 					auto it = albums.find(key);
 					if (it == albums.end())
-						albums[std::move(key)] = s->getMTime();
-					else
-						it->second = std::max(it->second, s->getMTime());
+						albums[std::move(key)] = std::make_tuple(s->getMTime(), std::vector<MPD::Song>());
+					else {
+						std::get<0>(it->second) = std::max(std::get<0>(it->second), s->getMTime());
+						std::get<1>(it->second).push_back(*s);
+					}
 				};
 				size_t idx = 0;
 				for (const auto &album : albums)
@@ -419,7 +425,8 @@ void MediaLibrary::update()
 						Album(primary_tag,
 							  std::get<0>(album.first),
 							  std::get<1>(album.first),
-						      album.second));
+							  std::get<0>(album.second),
+							  std::get<1>(album.second)));
 					if (idx < Albums.size())
 					{
 						Albums[idx].value() = std::move(entry);
@@ -443,8 +450,8 @@ void MediaLibrary::update()
 
 	ScopedUnfilteredMenu<MPD::Song> sunfilter_songs(ReapplyFilter::No, Songs);
 	if (!Albums.empty()
-	    && ((Songs.empty() && Global::Timer - m_timer > m_fetching_delay)
-	        || m_songs_update_request))
+		&& ((Songs.empty() && Global::Timer - m_timer > m_fetching_delay)
+			|| m_songs_update_request))
 	{
 		m_songs_update_request = false;
 		sunfilter_songs.set(ReapplyFilter::Yes, true);
@@ -452,11 +459,11 @@ void MediaLibrary::update()
 		size_t idx = 0;
 		MPD::SongIterator s;
 		if (hasTwoColumns)
-		    s = getAllSongsFromAlbum(album);
+			s = getAllSongsFromAlbum(album);
 		else
-		    s = getSongsFromAlbum(album);
+			s = getSongsFromAlbum(album);
 		for (MPD::SongIterator end;
-		     s != end; ++s, ++idx)
+			 s != end; ++s, ++idx)
 		{
 			if (idx < Songs.size())
 				Songs[idx].value() = std::move(*s);
@@ -655,9 +662,9 @@ void MediaLibrary::applyFilter(const std::string &constraint)
 		if (!constraint.empty())
 		{
 			Tags.applyFilter(Regex::Filter<PrimaryTag>(
-				                 constraint,
-				                 Config.regex_type,
-				                 TagEntryMatcher));
+								 constraint,
+								 Config.regex_type,
+								 TagEntryMatcher));
 		}
 		else
 			Tags.clearFilter();
@@ -667,9 +674,9 @@ void MediaLibrary::applyFilter(const std::string &constraint)
 		if (!constraint.empty())
 		{
 			Albums.applyFilter(Regex::ItemFilter<AlbumEntry>(
-				                   constraint,
-				                   Config.regex_type,
-				                   std::bind(AlbumEntryMatcher, ph::_1, ph::_2, true)));
+								   constraint,
+								   Config.regex_type,
+								   std::bind(AlbumEntryMatcher, ph::_1, ph::_2, true)));
 		}
 		else
 			Albums.clearFilter();
@@ -679,9 +686,9 @@ void MediaLibrary::applyFilter(const std::string &constraint)
 		if (!constraint.empty())
 		{
 			Songs.applyFilter(Regex::Filter<MPD::Song>(
-				                  constraint,
-				                  Config.regex_type,
-				                  SongEntryMatcher));
+								  constraint,
+								  Config.regex_type,
+								  SongEntryMatcher));
 		}
 		else
 			Songs.clearFilter();
@@ -780,7 +787,7 @@ std::vector<MPD::Song> MediaLibrary::getSelectedSongs()
 					Mpd.AddSearch(Config.media_lib_primary_tag, sc.entry().tag());
 				else
 					Mpd.AddSearch(Config.media_lib_primary_tag,
-					              Tags.current()->value().tag());
+								  Tags.current()->value().tag());
 				Mpd.AddSearch(MPD_TAG_ALBUM, sc.entry().album());
 				if (Config.media_library_albums_split_by_date)
 					Mpd.AddSearch(MPD_TAG_DATE, sc.entry().date());
@@ -1041,9 +1048,10 @@ void MediaLibrary::locateSong(const MPD::Song &s)
 			// See comment about tags not found above. This is the equivalent
 			// for two column mode.
 			Albums.addItem(AlbumEntry(Album(primary_tag,
-			                                s.getAlbum(),
-			                                Date_(s.getDate()),
-			                                s.getMTime())));
+											s.getAlbum(),
+											Date_(s.getDate()),
+											s.getMTime(),
+											std::vector<MPD::Song>{s})));
 			std::sort(Albums.beginV(), Albums.endV(), SortAlbumEntries());
 			Albums.refresh();
 			MoveToAlbum(Albums, primary_tag, s);
@@ -1084,20 +1092,23 @@ std::string AlbumToString(const AlbumEntry &ae)
 	{
 		result += ae.entry().album().empty() ? "<no album>" : ae.entry().album();
 
-        if (hasTwoColumns && !ae.entry().tag().empty())
-            result += " - " + ae.entry().tag();
+		if (hasTwoColumns) {
+			if (ae.entry().isCompilation()) result += " - " + ae.entry().albumArtist();
+			else result += " - " + *ae.entry().artists().begin();
+		}
 
-        if (Config.media_lib_primary_tag != MPD_TAG_DATE && !ae.entry().date().empty())
-            result += " (" + ae.entry().date() + ")";
+		if (Config.media_lib_primary_tag != MPD_TAG_DATE && !ae.entry().date().empty())
+			result += " (" + ae.entry().date() + ")";
 	}
+
 	return result;
 }
 
 std::string SongToString(const MPD::Song &s)
 {
-    return (hasTwoColumns
-        ? Format::stringify<char>(Format::parse("{%n - }%t{ - %a}"), &s)
-        : Format::stringify<char>(Config.song_library_format, &s));
+	return (hasTwoColumns
+		? Format::stringify<char>(Format::parse("{%n - }%t{ - %a}"), &s)
+		: Format::stringify<char>(Config.song_library_format, &s));
 }
 
 bool TagEntryMatcher(const Regex::Regex &rx, const PrimaryTag &pt)
