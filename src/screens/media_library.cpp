@@ -434,8 +434,8 @@ void MediaLibrary::update()
 				std::sort(Albums.beginV(), Albums.endV(), SortAlbumEntries());
 				if (albums.size() > 1)
 				{
-					Albums.addSeparator();
-					Albums.addItem(AlbumEntry::mkAllTracksEntry(primary_tag));
+					Albums.insertSeparator(0);
+					Albums.insertItem(0, AlbumEntry::mkAllTracksEntry(primary_tag));
 				}
 			}
 		}
